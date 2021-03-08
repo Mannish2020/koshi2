@@ -1,0 +1,257 @@
+---
+title: "Image Classification"
+author: "Manish Gyawali"
+date: 2021-03-07
+categories: ["R"]
+tags: ["R Markdown", "plot", "regression"]
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE)
+knitr::opts_chunk$set(message = FALSE, comment = "")
+```
+
+#  An exercise in using Machine Learning with Satellite Data
+
+Satellite imagery is an important source of data these days. Satellite systems such as *Landsat*, *Sentinel* and *MODIS* continuously circle the earth and deliver a trove of data. 
+
+Data of a sufficiently high resolution is freely available on the internet, pending only a registration. For this exercise I use LANDSAT-8 data that I downloaded from USGS's website. 
+
+The objective is to perform some basic analytical exercises on the data. For the purpose I utilized the *R* package for computational analysis. (Indeed, this website was also developed using R). 
+
+## Aims
+
+The overall objective is to demonstrate a clear framework for using machine learning (in particular, image classification) to predict geospatial features and to illustrate it using maps on the web. In this exercise, only dummy features are predicted (the images are real, however). Thereofre, this exercise is primarly a demonstration of the power of ML. 
+
+
+## Using Maps
+
+#### Using maps is also easy. We can use the *leaflet* or *mapview* packages to get interactive maps. ```
+#### We are here using the map of Nepal obtained form the *rnaturalearth* dataset.
+```{r, warning=FALSE, echo=FALSE}
+nep.data <- rnaturalearth::ne_states(country = 'Nepal')
+```
+
+#### We can also download datasets from the web and analyze them. Niti Foundation has created a *hydro map*. I downloaded the data and uploaded it again to my Github Page. I downloaded from this page again and saved it as a different file. We can now access the file.
+
+```{r, echo=F, message=FALSE}
+# download.file('https://raw.githubusercontent.com/Mannish2020/Datasets/main/niti.csv', destfile = '~/Datasets/Datasets/testniti.csv', method = 'curl')
+niti_file <- readr::read_csv("~/Datasets/Datasets/testniti.csv")
+DT::datatable(niti_file[c("Project","District","Municipality","Capacity (MW)",
+                          "License Type")])
+```
+
+# Add a map of Nepal
+
+# District level maps
+
+#### We can map districts too:
+
+
+```{r, echo=FALSE,message=NA}
+library(sf)
+nep_districts <- st_read('~/Datasets/country_data/nepal/shapefiles_districts/nepal_districts.shp')
+```
+
+
+```{r, echo=FALSE}
+library(ggplot2)
+ggplot() + geom_sf(data = nep_districts) + 
+  ggtitle("Nepal District Map") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+#### We use the *sf* package to create a spatial polygon of Nepal and the *ggplot2* package to visualize it.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(magrittr)
+niti_file$Levels <- cut(niti_file$`Capacity (MW)`,10,labels = FALSE)
+niti_file2 <- st_as_sf(niti_file,coords = c("Longitude","Latitude"), crs = 4326)
+ggplot() + 
+  geom_sf(data = st_as_sf(nep.data)) +
+  geom_sf(data = niti_file2, aes(color = Levels)) +
+  ggtitle("Nepal Zonal Map") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+# Interactive Maps
+
+#### *Leaflet* and *mapview* are two excellent packages in R for creating interactive maps. Here I use **mapview** to create a map of all the hydroelectric locations in Nepal. 
+
+```{r, echo=FALSE,warning=FALSE, fig.width=10}
+library(mapview)
+mapview(st_geometry(st_as_sf(nep.data)),alpha = 0.2, col.regions = "green") +
+  mapview(st_geometry(niti_file2),color = "white", col.regions = "red") +
+  mapview(st_geometry(nep_districts))
+```
+
+
+# Image Classification
+
+#### R is a powerful tool for machine learning. Recently, image classification of satellite data has become an important tool for policy analysis. As explained, I used LANDSAT data that was freely available from the web for the analysis. Here I will present the image that I obtained. The image has been separated into different colour *bands*. 
+
+```{r, echo=FALSE}
+path_to_folder  <-  "~/ICIMOD/Data/Koshi/landsat/feb24"
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(raster)
+raslist2 <- paste0(path_to_folder,"/",(list.files(path_to_folder)))[-1]
+# landsat2 <- rast(raslist2)
+landsat3 <- stack(raslist2)
+names(landsat3) <- c('blue', 'green', 'red', 'NIR', 'SWIR1', 'SWIR2')
+```
+
+```{r,echo=FALSE,eval=FALSE}
+# Landsat Basic Image
+plot(landsat3)
+```
+
+The images are not very clear but hide a lot of useful information. However, colour-composite images can reveal a lot more about the images. The two composites in popular usage are 'True Colour Composite (TCC)' and 'False Colour Composite (FCC)'. 
+
+```{r,echo=FALSE,eval=TRUE}
+# Lansat TCC, FCC Images
+## TCC
+plotRGB(stack(raslist2[c(4,3,2)]), axes = TRUE, stretch = 'lin', main = "Landsat TCC")
+## FCC
+plotRGB(stack(raslist2[c(5,4,3)]), axes = TRUE, stretch = 'lin', main = "Landsat FCC")
+```
+
+```{r, echo=FALSE}
+ls3 <- rasterToPoints(landsat3)
+samp1 <- sampleRandom(landsat3,1000,sp = TRUE)
+prj <-  "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs +towgs84=0,0,0"
+pts <- sp::spTransform(samp1, CRS(prj))
+library(data.table)
+rand.dt <- as.data.table(pts)
+rand.dt[,agg:= list(blue+green+red+NIR+SWIR1+SWIR2)]
+setcolorder(rand.dt,c('x','y'))
+```
+
+```{r, echo=FALSE, warning=FALSE}
+levs <- cut_number(rand.dt$agg, n = 4, labels = 1:4)
+rand.dt$levs <- levs
+```
+
+# Machine Learning
+
+Now that we have the image (of course, it is a demo image -- for real analysis we need a better image) we can proceed to analyse it. The technique used here is called *supervised classification*. We take an image, subdivide it into a training and testing set. The algorithm is 'trained' to identify prespecified categories within the images. Then, when the testing set is presented to it, it is able to identify the features. The testing set is used to check the accuracy of the algorithm. 
+
+In this exercise, we use two different (simple) algorithms to identify features: the *k-nearest neighbors* algorithm and the *classification and regression trees* algorithm. R has two powerful general-purpose machine learning packages : *caret* and *mlr3*. We train the first time using the caret package and the second time using the mlr3 package and compare the results. 
+
+#### Machine learning with caret: the knn algorithm
+
+```{r, echo=FALSE}
+# Machine learning with caret
+path_to_folder  <-  "~/ICIMOD/Data/Koshi/landsat/feb24"
+raslist2 <- paste0(path_to_folder,"/",(list.files(path_to_folder)))[-1]
+# landsat2 <- rast(raslist2)
+landsat3 <- stack(raslist2)
+names(landsat3) <- c('blue', 'green', 'red', 'NIR', 'SWIR1', 'SWIR2')
+ls3 <- rasterToPoints(landsat3)
+samp1 <- sampleRandom(landsat3,1000,sp = TRUE)
+prj <-  "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs +towgs84=0,0,0"
+pts <- sp::spTransform(samp1, CRS(prj))
+rand.dt <- as.data.table(pts)
+rand.dt[,agg:= list(blue+green+red+NIR+SWIR1+SWIR2)]
+setcolorder(rand.dt,c('x','y'))
+levs <- ggplot2::cut_number(rand.dt$agg, n = 4, labels = 1:4)
+rand.dt$levs <- levs
+DT <- rand.dt[,!c('x','y','agg')]
+library(caret)
+index <- createDataPartition(DT$levs,p=0.8,list = FALSE)
+trainset <- DT[index,]
+testset <- DT[-index,]
+# Use knn as a beginning
+trainsetX <- trainset[,.SD, .SDcols = !'levs']
+preProc <- preProcess(x = trainsetX, method = c('center','scale'))
+control_knn <- trainControl(method = 'cv',number = 5)
+knn.mod <- train(levs ~., 
+                 data = trainset,
+                 method = 'knn',
+                 trControl = control_knn,
+                 preProcess = c('center','scale'),
+                 tuneLength = 20
+                 )
+knnPredict <- predict(knn.mod,newdata = testset)
+conf_mat <- confusionMatrix(knnPredict,testset$levs)
+```
+
+The plot:
+```{r,echo=FALSE}
+plot(knn.mod)
+```
+
+Important characteristics
+ 
+ - Accuracy
+
+```{r, echo=F}
+conf_mat$overall[1]
+```
+
+- Confusion Matrix
+
+```{r,echo=FALSE}
+conf_mat$table
+```
+
+- Categorizing various factors by group
+
+```{r, echo=FALSE}
+conf_mat$byClass
+```
+
+#### Machine learning with mlr3: the CART algorithm
+
+
+```{r, echo=FALSE,eval=TRUE}
+library(mlr3)
+library(kknn)
+task = TaskClassif$new(
+  id = "data1", backend = DT, target = "levs")
+learner = lrn('classif.rpart')
+trainset2 = sample(task$nrow, 0.8*task$nrow)
+testset2 = setdiff(seq(task$nrow),trainset)
+learner$train(task,row_ids = trainset2)
+pred = learner$predict(task, row_ids = testset2)
+measure <- msr("classif.acc")
+```
+
+- Accuracy
+
+```{r, echo=F}
+pred$score(measure)
+```
+
+- Confusion Matrix
+
+```{r, echo=F}
+pred$confusion
+```
+
+#### Predictions on maps:
+
+The following map (unfortunately, not interactive) shows the predicted points with the categories specified.
+
+```{r, echo=FALSE, eval=T, fig.width=12}
+new.data <- rand.dt[testset2][,c('x','y')]
+setnames(new.data, c('x','y'),c('lon','lat'))
+new.data$preds <- pred$response
+new_data <- sf::st_as_sf(new.data, coords = c('lon','lat'), crs = 4326)
+ggplot() + 
+  geom_sf(data = sf::st_as_sf(nep.data)) +
+  geom_sf(data = new_data,mapping = aes(colour = preds)) +
+  ggtitle("Nepal Map with Predicted Values") +
+  theme(plot.title = element_text(hjust = 0.5))
+library(leaflet)
+pal <- colorFactor(
+  palette = c('red','blue','green','orange'),
+  domain = new_data$preds
+)
+leaflet(new_data) %>% 
+  addTiles()  %>% 
+  addCircles(color = ~pal(preds))
+  
+```

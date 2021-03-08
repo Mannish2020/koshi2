@@ -1,0 +1,205 @@
+---
+title: "A Look at the Koshi Basin"
+author: "Manish Gyawali"
+date: 2021-03-07
+categories: ["R"]
+tags: ["R Markdown", "plot", "regression"]
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE)
+knitr::opts_chunk$set(message = FALSE, comment = "")
+```
+
+There are thousands of rivers in Nepal (small and large), as the following map of the country shows. 
+
+```{r, echo=FALSE, warning=FALSE, results='hide'}
+
+library(sf)
+
+nep_districts <- st_read(
+  '~/Datasets/country_data/nepal/shapefiles_districts/nepal_districts.shp')
+
+nep.rivers <- st_read("~/ICIMOD/Data/GIS/rivers/River.shp")
+nep.rivers3 <- dplyr::filter(nep.rivers,RIVER_CODE == 1)
+
+library(ggplot2)
+
+ggplot() + 
+  geom_sf(
+  data = nep_districts, 
+  mapping = aes(fill = dist_name, alpha = 0.3),
+  show.legend = FALSE
+  ) + 
+  # scale_fill_viridis_d(option = "plasma", alpha = 0.25) +
+  geom_sf(
+    data = nep.rivers3,
+    mapping = aes(colour = Shape_len, alpha = 0.3),
+    show.legend = FALSE
+  ) + 
+  ggtitle("Rivers of Nepal") +
+  theme(plot.title = element_text(hjust = 0.5))
+ 
+```
+
+The Koshi River is a major river of Nepal that flows into India to become a tributary of the Ganga. The headwaters are in Tibet and flow into Nepal as one of three tributaries. The Sunkoshi is of interest here and it flows into the district of Sindhupalchok, which is very near the capital of Kathmandu. 
+
+
+### Details about Sindhupalchok district
+
+We can get information about some of the most important places in Sindhupalchok
+district. 
+
+
+```{r, echo=FALSE}
+
+library(stringr)
+
+places <- c("Chautara","Balephi","Khadichaur","Talamarang","Nawalpur",
+            "Kodari","Melamchi","Jalbire","Barabise")
+
+places <- paste(places,"Nepal", sep = ",")
+
+places.df <- as.data.frame(do.call(rbind,
+        lapply(places, function(x) tidygeocoder::geo(x, method = "osm")))
+)
+places.df$address <- str_replace(places.df$address,",Nepal","")
+```
+
+The following map shows the most important places in the district.
+
+As can be seen, most of the important places lie in the southern part of the district.Kodari is the only place of significance that lies in the northern half of the state.
+
+```{r, echo=FALSE, warning=FALSE, results='hide'}
+
+sind <- dplyr::filter(nep_districts, dist_name == 'Sindhupalchok')
+
+
+
+# Convert simple dataframe to spatial object
+places.sf <- sf::st_as_sf(
+  places.df, coords = c("long","lat"), crs = 4326, remove = FALSE, agr = "constant")
+sf::st_crs(places.sf) <- 4326
+
+sind.rivers <- sf::st_join(nep.rivers,places.sf)
+
+
+ggplot() + geom_sf(data = sind) + 
+  # geom_sf(data = places.sf) +
+  geom_sf(data = places.sf) + 
+    ggrepel::geom_text_repel(
+      data = places.sf, 
+      mapping = aes(x=long,y=lat,label=toupper(address)),
+      size = 3.1,
+      col = "blue",
+      alpha = 0.6
+      ) +
+  ggtitle("Important Places in Sindhupalchok") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+It is instructive to further look at the district's characteristics. It is difficult to get current data below the district level. We have to rely on earlier data. 
+
+First, let us look briefly look at all of the municipalities in the district, with a key to understanding how they are spatially distributed. Post-federalism, the goverment has done away with the concept of VDCs and now uses the term Urban/Rural municipalities.
+
+```{r,echo=F,results='hide',warning=F}
+
+dat <- sf::st_read('~/Datasets/gis/nepal/hermes_NPL_new_wgs/hermes_NPL_new_wgs_3.shp')
+sind.dat <- dplyr::filter(dat, DISTRICT == "Sindhupalchok")
+sind.dat1 <- cbind(sind.dat,st_coordinates(st_centroid(sind.dat)))
+
+ggplot() + 
+  geom_sf(
+    data = sind.dat, 
+    mapping = aes(fill = LOCAL),
+    alpha = 0.4,
+    show.legend = FALSE
+    ) + 
+  ggrepel::geom_text_repel(
+    data = sind.dat1,
+    mapping = aes(x=X,y=Y,label=toupper(LOCAL)),
+    size = 3,
+    col = "red",
+    alpha = 0.5
+  ) + 
+  ggtitle("Sindhupalchok:VDCs") +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title.x =  element_blank(),
+        axis.title.y = element_blank())
+
+```
+
+As can be seen, there are 12 Municipalities. Three of the municipalities are urban -- Melamchi, Chautara Shangachok Gadhi and Barhabise. 
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+library(dplyr)
+
+dw <- read.csv("~/Datasets/koshi_project/dw.csv")
+names(dw)[1] <- "Municipality"
+
+dw$Municipality <- str_replace(dw$Municipality,"Rural Municipality","") %>%        str_replace("Municipality","")
+
+dw <- dw %>% arrange(Municipality)
+
+sind.dat$LOCAL <- dw$Municipality
+sind.dat <- sind.dat %>% arrange(LOCAL)
+
+sind.dat2 <-  left_join(sind.dat,dw, by=c("LOCAL"="Municipality"))
+
+```
+
+We can look at particular characteristics of districts, and also go down to the VDC/municipality level. 
+
+In the following series of maps, different features of availability of drinking water in Sindhupalchok is looked at. For example, in the case of piped water, we see that Chautara, is, as expected, much better in terms of the number of households with access to it than more remote municipalities like Hemalbu. The caveat is that the data is from 2011. 
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+water.vars <- names(sind.dat2)[7:12]
+
+library(magrittr)
+
+sind.dat2 %<>% cbind(sf::st_coordinates(sf::st_centroid(sind.dat2)))
+
+plots <- lapply(water.vars, function(x){
+  ggplot(sind.dat2) + 
+  geom_sf(mapping = aes(fill = eval(str2expression(x)))) + 
+    scale_fill_viridis_c(
+      option = "plasma",
+      name = paste0("Number of\n ",x), 
+      alpha = 0.4) +
+    ggrepel::geom_text_repel(
+      mapping = aes(X,Y,label = LOCAL),
+      alpha = 0.5
+      ) +
+  geom_sf(data = places.sf) + 
+    ggrepel::geom_text_repel(
+      data = places.sf, 
+      mapping = aes(x=long,y=lat,label=toupper(address)),
+      size = 3,
+      col = "red",
+      alpha = 0.7
+      ) +
+  ggtitle(x) +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      axis.title = element_blank(),
+      # plot.margin = unit(c(0,0,0,0),"cm"),
+      legend.position = "bottom"
+        ) 
+})
+
+library(cowplot)
+
+plot_grid(plots[[1]],plots[[2]])
+plot_grid(plots[[3]],plots[[4]])
+plot_grid(plots[[5]],plots[[6]])
+
+
+```
+
+More current data may be obtained by using Machine Learning techniques. As was mentioned earlier, satellite imagery can be a very important source of raw data, including time series data. Training algorithms to classify land usages, and then using that to predict actual usage, as was demonstrated, can be of enormous value.
+
+

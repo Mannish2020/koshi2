@@ -1,0 +1,64 @@
+---
+title: "More ML"
+author: "Manish Gyawali"
+date: 2021-03-08
+categories: ["R"]
+tags: ["R Markdown", "plot", "regression"]
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE)
+knitr::opts_chunk$set(message = FALSE, comment = "")
+```
+
+```{r, echo=FALSE}
+
+library(raster)
+library(data.table)
+
+# Machine learning with caret
+path_to_folder  <-  "~/ICIMOD/Data/Koshi/landsat/feb24"
+raslist2 <- paste0(path_to_folder,"/",(list.files(path_to_folder)))[-1]
+# landsat2 <- rast(raslist2)
+landsat3 <- stack(raslist2)
+names(landsat3) <- c('blue', 'green', 'red', 'NIR', 'SWIR1', 'SWIR2')
+ls3 <- rasterToPoints(landsat3)
+samp1 <- sampleRandom(landsat3,1000,sp = TRUE)
+prj <-  "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs +towgs84=0,0,0"
+pts <- sp::spTransform(samp1, CRS(prj))
+rand.dt <- as.data.table(pts)
+rand.dt[,agg:= list(blue+green+red+NIR+SWIR1+SWIR2)]
+setcolorder(rand.dt,c('x','y'))
+levs <- ggplot2::cut_number(rand.dt$agg, n = 4, labels = 1:4)
+rand.dt$levs <- levs
+DT <- rand.dt[,!c('x','y','agg')]
+
+
+library(caret)
+
+
+index <- createDataPartition(DT$levs,p=0.8,list = FALSE)
+trainset <- DT[index,]
+testset <- DT[-index,]
+# Use knn as a beginning
+trainsetX <- trainset[,.SD, .SDcols = !'levs']
+preProc <- preProcess(x = trainsetX, method = c('center','scale'))
+control_knn <- trainControl(method = 'cv',number = 5)
+knn.mod <- train(levs ~., 
+                 data = trainset,
+                 method = 'knn',
+                 trControl = control_knn,
+                 preProcess = c('center','scale'),
+                 tuneLength = 20
+                 )
+knnPredict <- predict(knn.mod,newdata = testset)
+conf_mat <- confusionMatrix(knnPredict,testset$levs)
+
+```
+
+```{r}
+conf_mat$table
+conf_mat$byClass
+```
+
